@@ -321,55 +321,6 @@ export default function AdminPage() {
           return memberWarningCandidates;
         });
 
-      // Son üç ardışık toplantı mazeretsiz devamsızlıksa uyarı adayı olur.
-      const existingWarnings = warningResult.data ?? [];
-
-      const warningCandidates = loadedMembers
-        .filter((member) => member.active)
-        .flatMap((member) => {
-          const memberMeetings = loadedHistory
-            .flatMap((week) => {
-              const entry = week.entries.find(
-                (item) => item.memberId === member.id
-              );
-
-              return entry
-                ? [{ weekId: week.id, date: week.date, entry }]
-                : [];
-            })
-            .sort((a, b) => a.date.localeCompare(b.date));
-
-          let currentAbsenceStreak: string[] = [];
-
-          for (const meeting of memberMeetings) {
-            const isUnexcusedAbsence =
-              meeting.entry.status === "Gelmedi" &&
-              (meeting.entry.excuseStatus === "Yok" ||
-                meeting.entry.excuseStatus === "Reddedildi");
-
-            if (isUnexcusedAbsence) {
-              currentAbsenceStreak.push(meeting.weekId);
-            } else {
-              currentAbsenceStreak = [];
-            }
-          }
-
-          if (currentAbsenceStreak.length < 3) {
-            return [];
-          }
-
-          // Aynı kesintisiz devamsızlık serisi için tek uyarı oluşturulur.
-          const streakStartId = currentAbsenceStreak[0];
-
-          return [
-            {
-              memberId: member.id,
-              memberName: member.name,
-              warningType: `3 toplantı devamsızlığı:${streakStartId}`,
-            },
-          ];
-        });
-
       const newWarningRows = warningCandidates
         .filter(
           (candidate) =>
