@@ -41,16 +41,15 @@ type DutySlot = {
   responsibleMemberId: string;
 };
 
-// Verilen tarihin ait olduğu haftanın pazartesi tarihini bulur.
-function getWeekStart(dateString: string): string {
-  const date = new Date(`${dateString}T00:00:00Z`);
-  const day = date.getUTCDay();
-  const difference = day === 0 ? -6 : 1 - day;
-
-  date.setUTCDate(date.getUTCDate() + difference);
-
-  return date.toISOString().slice(0, 10);
-}
+type WarningLog = {
+  id: string;
+  memberId: string | null;
+  memberName: string;
+  warningType: string;
+  channel: string;
+  status: string;
+  createdAt: string;
+};
 
 export default function AdminPage() {
   const router = useRouter();
@@ -59,6 +58,7 @@ export default function AdminPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [services, setServices] = useState<DutySlot[]>([]);
   const [history, setHistory] = useState<AttendanceWeek[]>([]);
+  const [warningLogs, setWarningLogs] = useState<WarningLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -70,16 +70,17 @@ export default function AdminPage() {
   const [memberEmail, setMemberEmail] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
 
-const [attendanceDate, setAttendanceDate] = useState("");
+  const [attendanceDate, setAttendanceDate] = useState("");
 
-useEffect(() => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
+  useEffect(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
 
-  setAttendanceDate(`${year}-${month}-${day}`);
-}, []);
+    setAttendanceDate(`${year}-${month}-${day}`);
+  }, []);
+
   const [attendance, setAttendance] = useState<
     Record<string, AttendanceStatus | "">
   >({});
@@ -133,59 +134,13 @@ useEffect(() => {
       entry.excuseStatus === "Reddedildi" || entry.excuseStatus === "Yok"
   );
 
-  // Uyarı için son üç farklı takvim haftası kontrol edilir.
-  const warnings = useMemo(() => {
-    const sortedHistory = [...history].sort((a, b) =>
-      b.date.localeCompare(a.date)
-    );
+  const pendingWarnings = warningLogs.filter(
+    (warning) => warning.status === "Beklemede"
+  );
 
-    // Aynı takvim haftasında birden fazla yoklama varsa
-    // o haftanın en son tarihli yoklaması dikkate alınır.
-    const latestByCalendarWeek = new Map<string, AttendanceWeek>();
-
-    for (const week of sortedHistory) {
-      const weekStart = getWeekStart(week.date);
-
-      if (!latestByCalendarWeek.has(weekStart)) {
-        latestByCalendarWeek.set(weekStart, week);
-      }
-    }
-
-    const recentWeeks = [...latestByCalendarWeek.entries()]
-      .sort(([dateA], [dateB]) => dateB.localeCompare(dateA))
-      .slice(0, 3);
-
-    if (recentWeeks.length !== 3) return [];
-
-    const weekMilliseconds = 7 * 24 * 60 * 60 * 1000;
-
-    const weekDates = recentWeeks.map(([weekStart]) =>
-      Date.parse(`${weekStart}T00:00:00Z`)
-    );
-
-    // Üç hafta gerçekten birbirini takip ediyor mu?
-    const areConsecutive =
-      weekDates[0] - weekDates[1] === weekMilliseconds &&
-      weekDates[1] - weekDates[2] === weekMilliseconds;
-
-    if (!areConsecutive) return [];
-
-    const lastThreeWeeks = recentWeeks.map(([, week]) => week);
-
-    return activeMembers.filter((member) =>
-      lastThreeWeeks.every((week) => {
-        const entry = week.entries.find(
-          (item) => item.memberId === member.id
-        );
-
-        return (
-          entry?.status === "Gelmedi" &&
-          (entry.excuseStatus === "Yok" ||
-            entry.excuseStatus === "Reddedildi")
-        );
-      })
-    );
-  }, [history, activeMembers]);
+  const completedWarnings = warningLogs.filter(
+    (warning) => warning.status !== "Beklemede"
+  );
 
   function showMessage(text: string) {
     setMessage(text);
@@ -225,19 +180,28 @@ useEffect(() => {
     setLoading(true);
 
     try {
-      const [memberResult, dutyResult, weekResult] = await Promise.all([
+      const [
+        memberResult,
+        dutyResult,
+        weekResult,
+        warningResult,
+      ] = await Promise.all([
         supabase.from("members").select("*").order("name"),
         supabase.from("duty_slots").select("*").order("slot_number"),
         supabase
           .from("attendance_weeks")
           .select("*")
-          .order("attendance_date", { ascending: false })
-          .limit(20),
+          .order("attendance_date", { ascending: false }),
+        supabase
+          .from("warning_logs")
+          .select("*")
+          .order("created_at", { ascending: false }),
       ]);
 
       if (memberResult.error) throw memberResult.error;
       if (dutyResult.error) throw dutyResult.error;
       if (weekResult.error) throw weekResult.error;
+      if (warningResult.error) throw warningResult.error;
 
       const loadedMembers: Member[] = (memberResult.data ?? []).map(
         (item: any) => ({
@@ -298,9 +262,105 @@ useEffect(() => {
         });
       }
 
+      // Her üyenin kendi yoklama kayıtları tarih sırasına konur.
+      // Son üç ardışık toplantı mazeretsiz devamsızlıksa uyarı adayı olur.
+      const existingWarnings = warningResult.data ?? [];
+
+      const warningCandidates = loadedMembers
+        .filter((member) => member.active)
+        .flatMap((member) => {
+          const memberMeetings = loadedHistory
+            .flatMap((week) => {
+              const entry = week.entries.find(
+                (item) => item.memberId === member.id
+              );
+
+              return entry
+                ? [{ weekId: week.id, date: week.date, entry }]
+                : [];
+            })
+            .sort((a, b) => a.date.localeCompare(b.date));
+
+          let currentAbsenceStreak: string[] = [];
+
+          for (const meeting of memberMeetings) {
+            const isUnexcusedAbsence =
+              meeting.entry.status === "Gelmedi" &&
+              (meeting.entry.excuseStatus === "Yok" ||
+                meeting.entry.excuseStatus === "Reddedildi");
+
+            if (isUnexcusedAbsence) {
+              currentAbsenceStreak.push(meeting.weekId);
+            } else {
+              currentAbsenceStreak = [];
+            }
+          }
+
+          if (currentAbsenceStreak.length < 3) {
+            return [];
+          }
+
+          // Aynı kesintisiz devamsızlık serisi için tek uyarı oluşturulur.
+          const streakStartId = currentAbsenceStreak[0];
+
+          return [
+            {
+              memberId: member.id,
+              memberName: member.name,
+              warningType: `3 toplantı devamsızlığı:${streakStartId}`,
+            },
+          ];
+        });
+
+      const newWarningRows = warningCandidates
+        .filter(
+          (candidate) =>
+            !existingWarnings.some(
+              (warning: any) =>
+                warning.member_id === candidate.memberId &&
+                warning.warning_type === candidate.warningType
+            )
+        )
+        .map((candidate) => ({
+          member_id: candidate.memberId,
+          member_name: candidate.memberName,
+          warning_type: candidate.warningType,
+          channel: "Sistem",
+          status: "Beklemede",
+        }));
+
+      if (newWarningRows.length > 0) {
+        const insertWarnings = await supabase
+          .from("warning_logs")
+          .insert(newWarningRows);
+
+        if (insertWarnings.error) throw insertWarnings.error;
+      }
+
+      // Yeni uyarılar dahil tüm uyarı kayıtlarını tekrar al.
+      const refreshedWarnings = await supabase
+        .from("warning_logs")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (refreshedWarnings.error) throw refreshedWarnings.error;
+
+      const loadedWarnings: WarningLog[] = (
+        refreshedWarnings.data ?? []
+      ).map((item: any) => ({
+        id: item.id,
+        memberId: item.member_id,
+        memberName: item.member_name,
+        warningType: item.warning_type,
+        channel: item.channel,
+        status: item.status,
+        createdAt: item.created_at,
+      }));
+
       setMembers(loadedMembers);
       setServices(loadedServices);
       setHistory(loadedHistory);
+      setWarningLogs(loadedWarnings);
     } catch (error) {
       showError(error);
     } finally {
@@ -627,6 +687,37 @@ useEffect(() => {
         decision === "Onaylandı"
           ? "Mazeret onaylandı."
           : "Mazeret reddedildi."
+      );
+    } catch (error) {
+      showError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function markWarningDone(warning: WarningLog) {
+    if (saving) return;
+
+    const confirmed = window.confirm(
+      `${warning.memberName} için uyarının yapıldığını onaylıyor musun?`
+    );
+
+    if (!confirmed) return;
+
+    setSaving(true);
+
+    try {
+      const result = await supabase
+        .from("warning_logs")
+        .update({ status: "Yapıldı" })
+        .eq("id", warning.id);
+
+      if (result.error) throw result.error;
+
+      await loadData();
+
+      showMessage(
+        `${warning.memberName} için uyarı yapıldı olarak işaretlendi.`
       );
     } catch (error) {
       showError(error);
@@ -1199,33 +1290,95 @@ useEffect(() => {
                 <h2 className="text-xl font-bold">Devamsızlık Uyarıları</h2>
 
                 <p className="mt-1 text-sm text-slate-500">
-                  Son üç ardışık takvim haftasının tamamında mazeretsiz
-                  devamsız olan aktif üyeler.
+                  Üç ardışık toplantıda mazeretsiz devamsızlık yapan üyeler.
                 </p>
 
-                {warnings.length === 0 ? (
-                  <p className="mt-4 rounded-lg bg-green-50 p-4 text-green-800">
-                    Şu anda uyarı koşulunu sağlayan üye yok.
-                  </p>
-                ) : (
-                  <div className="mt-4 grid gap-3">
-                    {warnings.map((member) => (
-                      <div
-                        key={member.id}
-                        className="rounded-xl border border-red-200 bg-red-50 p-4"
-                      >
-                        <strong>{member.name}</strong>
-                        <p className="mt-1 text-sm text-red-800">
-                          Son üç ardışık takvim haftasında mazeretsiz
-                          devamsızlık yaptı veya mazereti reddedildi.
-                        </p>
-                        <p className="mt-2 text-xs text-slate-600">
-                          Bu panel otomatik WhatsApp mesajı göndermez.
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="mt-5">
+                  <h3 className="mb-3 font-bold text-red-700">
+                    Yapılması Beklenen Uyarılar ({pendingWarnings.length})
+                  </h3>
+
+                  {pendingWarnings.length === 0 ? (
+                    <p className="rounded-lg bg-green-50 p-4 text-green-800">
+                      Şu anda bekleyen uyarı yok.
+                    </p>
+                  ) : (
+                    <div className="grid gap-3">
+                      {pendingWarnings.map((warning) => (
+                        <article
+                          key={warning.id}
+                          className="rounded-xl border border-red-200 bg-red-50 p-4"
+                        >
+                          <strong>{warning.memberName}</strong>
+
+                          <p className="mt-2 text-sm text-red-800">
+                            Üç ardışık toplantıya mazeretsiz katılmadı.
+                          </p>
+
+                          <p className="mt-2 text-xs text-slate-600">
+                            Oluşturulma:{" "}
+                            {new Date(warning.createdAt).toLocaleDateString(
+                              "tr-TR"
+                            )}
+                          </p>
+
+                          <p className="mt-2 text-xs text-slate-600">
+                            Bu panel otomatik WhatsApp mesajı göndermez.
+                          </p>
+
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => void markWarningDone(warning)}
+                            className="mt-4 rounded-lg bg-green-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
+                          >
+                            {saving ? "Kaydediliyor..." : "Uyarı Yapıldı"}
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-8 border-t pt-5">
+                  <h3 className="mb-3 font-bold text-slate-700">
+                    Uyarı Geçmişi
+                  </h3>
+
+                  {completedWarnings.length === 0 ? (
+                    <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">
+                      Henüz tamamlanmış uyarı yok.
+                    </p>
+                  ) : (
+                    <div className="grid gap-3">
+                      {completedWarnings.map((warning) => (
+                        <article
+                          key={warning.id}
+                          className="rounded-xl border border-green-200 bg-green-50 p-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <strong>{warning.memberName}</strong>
+                            <span className="rounded-full bg-green-200 px-3 py-1 text-xs font-semibold text-green-900">
+                              {warning.status === "Yapıldı"
+                                ? "Uyarı Yapıldı"
+                                : warning.status}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-sm text-slate-600">
+                            Üç ardışık toplantı devamsızlığı
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            {new Date(warning.createdAt).toLocaleDateString(
+                              "tr-TR"
+                            )}
+                          </p>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </section>
             )}
 
