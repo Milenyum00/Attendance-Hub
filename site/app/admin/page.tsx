@@ -873,25 +873,25 @@ export default function AdminPage() {
   ];
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 text-slate-900 sm:px-8">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
+    <main className="min-h-screen w-full overflow-x-hidden bg-slate-100 px-3 py-4 text-slate-900 sm:px-8 sm:py-6">
+      <div className="mx-auto w-full max-w-6xl min-w-0">
+        <header className="mb-5 flex flex-col items-stretch justify-between gap-4 sm:mb-6 sm:flex-row sm:items-center">
           <div>
             <p className="text-sm font-bold uppercase tracking-widest text-blue-700">
               Attendance Hub
             </p>
-            <h1 className="mt-1 text-3xl font-bold">Yönetim Paneli</h1>
+            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Yönetim Paneli</h1>
             <p className="mt-2 text-slate-600">
               Topluluk yönetimi ve katılım takibi
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             <button
               type="button"
               onClick={() => void handleLogout()}
               disabled={loggingOut}
-              className="rounded-xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 w-full rounded-xl bg-red-700 px-5 py-3 font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
             >
               {loggingOut ? "Çıkış Yapılıyor..." : "Çıkış Yap"}
             </button>
@@ -917,7 +917,7 @@ export default function AdminPage() {
           </div>
         ) : (
           <>
-            <section className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <section className="mb-5 grid grid-cols-2 gap-2 sm:mb-6 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
               {[
                 ["Toplam Üye", members.length],
                 ["Aktif Üye", activeMembers.length],
@@ -926,15 +926,15 @@ export default function AdminPage() {
               ].map(([label, value]) => (
                 <div
                   key={String(label)}
-                  className="rounded-2xl border bg-white p-5"
+                  className="min-w-0 rounded-2xl border bg-white p-3 sm:p-5"
                 >
                   <p className="text-sm text-slate-500">{label}</p>
-                  <p className="mt-2 text-3xl font-bold">{value}</p>
+                  <p className="mt-1 text-2xl font-bold sm:mt-2 sm:text-3xl">{value}</p>
                 </div>
               ))}
             </section>
 
-            <nav className="mb-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <nav className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {sections.map(([id, label]) => (
                 <button
                   key={id}
@@ -942,7 +942,7 @@ export default function AdminPage() {
                   onClick={() =>
                     setSection((current) => (current === id ? "" : id))
                   }
-                  className={`rounded-xl border p-3 text-left font-semibold ${
+                  className={`min-h-12 rounded-xl border p-3 text-left text-sm font-semibold transition sm:text-base ${
                     section === id
                       ? "border-blue-700 bg-blue-700 text-white"
                       : "bg-white text-slate-700"
@@ -954,12 +954,12 @@ export default function AdminPage() {
             </nav>
 
             {section === "uyeler" && (
-              <section className="rounded-2xl border bg-white p-5 shadow-sm">
+              <section className="min-w-0 rounded-2xl border bg-white p-3 shadow-sm sm:p-5">
                 <h2 className="mb-4 text-xl font-bold">Üye Yönetimi</h2>
 
                 <form
                   onSubmit={saveMember}
-                  className="mb-6 grid gap-3 rounded-xl bg-slate-50 p-4 sm:grid-cols-2"
+                  className="mb-6 grid min-w-0 gap-3 rounded-xl bg-slate-50 p-3 sm:grid-cols-2 sm:p-4"
                 >
                   <label className="text-sm font-semibold">
                     Ad Soyad
@@ -1012,7 +1012,7 @@ export default function AdminPage() {
                     />
                   </label>
 
-                  <div className="flex flex-wrap gap-2 sm:col-span-2">
+                  <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:flex-wrap">
                     <button
                       disabled={saving}
                       className="rounded-lg bg-blue-700 px-5 py-3 font-semibold text-white disabled:opacity-50"
@@ -1062,7 +1062,7 @@ export default function AdminPage() {
                           </p>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
+                        <div className="mt-3 flex flex-wrap gap-2 sm:mt-0">
                           <button
                             type="button"
                             disabled={saving}
@@ -1127,10 +1127,10 @@ export default function AdminPage() {
 
                   {activeMembers.map((member) => (
                     <div key={member.id} className="rounded-xl border p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <strong>{member.name}</strong>
+                      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+                        <strong className="break-words">{member.name}</strong>
 
-                        <div className="flex gap-4">
+                        <div className="flex flex-wrap gap-5">
                           {(["Geldi", "Gelmedi"] as const).map((status) => (
                             <label
                               key={status}
