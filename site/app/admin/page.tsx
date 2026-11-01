@@ -262,7 +262,65 @@ export default function AdminPage() {
         });
       }
 
-      // Her üyenin kendi yoklama kayıtları tarih sırasına konur.
+     
+      // Her üyenin geçmişteki bütün toplantıları kontrol edilir.
+      // Üç ardışık mazeretsiz devamsızlık oluştuğunda uyarı kaydı üretilir.
+      // Sonraki katılım, oluşturulmuş uyarıyı silmez.
+      const existingWarnings = warningResult.data ?? [];
+
+      const warningCandidates = loadedMembers
+        .filter((member) => member.active)
+        .flatMap((member) => {
+          const memberMeetings = loadedHistory
+            .flatMap((week) => {
+              const entry = week.entries.find(
+                (item) => item.memberId === member.id
+              );
+
+              return entry
+                ? [{ weekId: week.id, date: week.date, entry }]
+                : [];
+            })
+            .sort((a, b) => a.date.localeCompare(b.date));
+
+          let currentAbsenceStreak: string[] = [];
+          const memberWarningCandidates: {
+            memberId: string;
+            memberName: string;
+            warningType: string;
+          }[] = [];
+
+          for (const meeting of memberMeetings) {
+            const isUnexcusedAbsence =
+              meeting.entry.status === "Gelmedi" &&
+              (meeting.entry.excuseStatus === "Yok" ||
+                meeting.entry.excuseStatus === "Reddedildi");
+
+            if (isUnexcusedAbsence) {
+              currentAbsenceStreak.push(meeting.weekId);
+
+              // Serinin üçüncü mazeretsiz devamsızlığında bir uyarı oluştur.
+              // Aynı seri dört, beş veya daha fazla toplantıya uzasa da
+              // ikinci bir uyarı oluşturulmaz.
+              if (currentAbsenceStreak.length === 3) {
+                const streakStartId = currentAbsenceStreak[0];
+
+                memberWarningCandidates.push({
+                  memberId: member.id,
+                  memberName: member.name,
+                  warningType: `3 toplantı devamsızlığı:${streakStartId}`,
+                });
+              }
+            } else {
+              // Katılım veya mazeret beklemede/onaylıysa yeni seri başlar.
+              // Önceden oluşturulmuş uyarı kaydı veritabanında korunur.
+              currentAbsenceStreak = [];
+            }
+          }
+
+          return memberWarningCandidates;
+        });
+
       // Son üç ardışık toplantı mazeretsiz devamsızlıksa uyarı adayı olur.
       const existingWarnings = warningResult.data ?? [];
 
